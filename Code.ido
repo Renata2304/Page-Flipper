@@ -1,0 +1,268 @@
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+#include <Servo.h>
+
+Adafruit_MPU6050 mpu_right;
+sensors_event_t ar, gr, tempr;
+Adafruit_MPU6050 mpu_left;
+sensors_event_t al, gl, templ;
+Adafruit_MPU6050 mpu_center;
+sensors_event_t ac, gc, tempc;
+
+const int S0 = A0;
+const int S1 = A1;
+const int S2 = A2;
+const int S3 = A3;
+
+int MAX_ANGLE = 180;
+int MIN_ANGLE = 0;
+
+int steps[8];
+int first[8];
+
+// button go right
+int button_right_pin = 2;
+int lastButtonStateRight;
+int currentButtonStateRight;
+// button go left
+int button_left_pin = 4;
+int lastButtonStateLeft;
+int currentButtonStateLeft;
+
+// right leg
+Servo servo1;
+int servo1_pin = 3;
+int servo1_angle = 90;
+// left leg
+Servo servo2;
+int servo2_pin = 5;
+int servo2_angle = 90;
+// up leg
+Servo servo3;
+int servo3_pin = 6;
+int servo3_angle = 90;
+// weel rotation
+Servo servo4;
+int servo4_pin = 9;
+int servo4_angle = 90;
+// down leg
+Servo servo5;
+int servo5_pin = 10;
+int servo5_angle = 0;
+
+int was_button1_pressed = 0;
+int was_button2_pressed = 0;
+int has_servo1_stopped = 0;
+
+void init_mpu(Adafruit_MPU6050 *mpu_to_be_initialized) {
+  // Try to initialize!
+	if (!(*mpu_to_be_initialized).begin()) {
+		Serial.println("Failed to find MPU6050 chip");
+		while (1) {
+		  delay(10);
+		}
+	}
+	Serial.println("MPU6050 Found!");
+
+	// set accelerometer range to +-8G
+	(*mpu_to_be_initialized).setAccelerometerRange(MPU6050_RANGE_8_G);
+
+	// set gyro range to +- 500 deg/s
+	(*mpu_to_be_initialized).setGyroRange(MPU6050_RANGE_500_DEG);
+
+	// set filter bandwidth to 21 Hz
+	(*mpu_to_be_initialized).setFilterBandwidth(MPU6050_BAND_21_HZ);
+
+}
+
+void setup(void) {
+	Serial.begin(115200);
+
+  pinMode(S0, OUTPUT);
+  digitalWrite(S0, LOW);
+  pinMode(S1, OUTPUT);
+  digitalWrite(S1, LOW);
+  pinMode(S2, OUTPUT);
+  digitalWrite(S2, LOW);
+  pinMode(S3, OUTPUT);
+  digitalWrite(S3, LOW);
+
+  pinMode(button_right_pin, INPUT_PULLUP);
+  pinMode(button_left_pin, INPUT_PULLUP);
+  servo1.attach(servo1_pin);
+  servo1.write(90);
+  servo2.attach(servo2_pin);
+  servo3.attach(servo3_pin);
+  servo3.write(90);
+  servo4.attach(servo4_pin);
+  // servo4.write(90);
+  servo5.attach(servo5_pin);
+
+  // init_mpu(mpu_right);
+  init_mpu(&mpu_left);
+  // init_mpu(mpu_center);
+
+	delay(100);
+}
+
+void move_weel(int i) {
+    if (servo4_angle <= 0 && was_button1_pressed ||
+        servo4_angle >= 180 && was_button2_pressed) {
+          // was_button1_pressed = 0;
+          steps[i] = 0;
+          steps[i + 1] = 1;
+          return;
+    }
+    int way = 1;
+    if (was_button1_pressed)
+      way = -1;
+    else way = 1;
+    servo4_angle += 5 * way;
+    servo4.write(servo4_angle);
+}
+
+void move_upper_leg(int i){
+    if (servo3_angle <= 0 && was_button1_pressed ||
+        servo3_angle >= 180 && was_button2_pressed) {
+      steps[i] = 0;
+      steps[i + 1] = 1;
+      return;
+    }
+    int way = 1;
+    if (was_button1_pressed)
+      way = -1;
+    else way = 1;
+    // change angle of servo motor
+    servo3_angle += 5 * way;
+
+    // control servo motor arccoding to the angle
+    servo3.write(servo3_angle);
+}
+
+void lower_leg(Servo servo_to_be_moved, int *servo_angle, int i){
+    if ((*servo_angle) == 0) {
+      steps[i] = 0;
+      steps[i + 1] = 1;
+      return;
+    }
+    // change angle of servo motor
+    (*servo_angle) -= 5;
+
+    // control servo motor arccoding to the angle
+    servo_to_be_moved.write(*servo_angle);
+}
+
+void raise_leg(Servo servo_to_be_moved, int *servo_angle, int i){    
+    if ((*servo_angle) == 180) {
+      // was_button1_pressed = 0;
+      steps[i] = 0;
+      steps[i + 1] = 1;
+      return;
+    }
+
+    // change angle of servo motor
+    (*servo_angle) += 5;
+
+    // control servo motor arccoding to the angle
+    servo_to_be_moved.write(*servo_angle);
+}
+
+// int get_steps_left(){
+//     int sum = 0;
+//     for (int i = 0; i < 7; i++)
+//       sum += steps[i];
+//     return sum;
+// }
+
+void loop() {
+	/* Get new sensor events with the readings */
+	mpu_right.getEvent(&ar, &gr, &tempr);
+	mpu_left.getEvent(&al, &gl, &templ);
+	mpu_center.getEvent(&ac, &gc, &tempc);
+
+  lastButtonStateRight    = currentButtonStateRight;       // save the last state
+  currentButtonStateRight = digitalRead(button_right_pin); // read new state
+  lastButtonStateLeft    = currentButtonStateLeft;       // save the last state
+  currentButtonStateLeft = digitalRead(button_left_pin); // read new state
+
+  if (lastButtonStateRight == HIGH && currentButtonStateRight == LOW && !was_button2_pressed) {
+    was_button1_pressed = 1;
+    for (int i = 0; i < 8; i++) steps[i] = 0;
+    steps[0] = 1;
+    servo4_angle = 180;
+    servo4.write(180);
+    servo5_angle = 180;
+    servo5.write(180);
+    first[1] = 1;
+	  delay(50);
+  }
+
+  if (was_button1_pressed) {
+    if (steps[0])
+      raise_leg(servo1, &servo1_angle, 0);
+    if (steps[1])
+      move_upper_leg(1);
+    if (steps[2])
+      move_weel(2);
+    if (steps[3])
+      lower_leg(servo1, &servo1_angle, 3);
+    if (steps[4]) 
+      raise_leg(servo2, &servo2_angle, 4);
+    if (steps[5])
+      lower_leg(servo5, &servo5_angle, 5);
+    if (steps[6])
+      lower_leg(servo2, &servo2_angle, 6);
+    if (steps[7]) was_button1_pressed = 0;
+    // if (first[1]) {
+    //   servo2_angle -= 2;
+    //   servo2.write(servo2_angle);
+    //   first[1] = 0;
+    // }
+    // if (servo2_angle > 0)
+    //   if (!(abs(gl.gyro.x) < 0.15 && abs(gl.gyro.y) < 0.15 && abs(gl.gyro.z) < 0.15)) { 
+    //     Serial.println(servo2_angle); 
+    //     Serial.print("Rotation X: ");
+    //     Serial.print(gl.gyro.x);
+    //     Serial.print(", Y: ");
+    //     Serial.print(gl.gyro.y);
+    //     Serial.print(", Z: ");
+    //     Serial.println(gl.gyro.z);
+    //     servo2_angle -= 2;
+    //     servo2.write(servo2_angle);
+    //   }
+  }
+
+  if (lastButtonStateLeft == HIGH && currentButtonStateLeft == LOW && !was_button1_pressed) {
+    was_button2_pressed = 1;
+    for (int i = 0; i < 8; i++) steps[i] = 0;
+    steps[0] = 1;
+    servo4_angle = 0;
+    servo4.write(0);
+    servo5_angle = 0;
+    servo5.write(0);
+	  delay(10);
+  }
+
+  if (was_button2_pressed) {
+    if (steps[0])
+      raise_leg(servo2, &servo2_angle, 0);
+    if (steps[1])
+      move_upper_leg(1);
+    if (steps[2])
+      move_weel(2);
+    if (steps[3])
+      lower_leg(servo2, &servo2_angle, 3);
+    if (steps[4]) 
+      raise_leg(servo1, &servo1_angle, 4);
+    if (steps[5])
+      raise_leg(servo5, &servo5_angle, 5);
+    if (steps[6])
+      lower_leg(servo1, &servo1_angle, 6);
+    if (steps[7]) was_button2_pressed = 0;
+  }
+
+  // Serial.println(servo2_angle);
+
+  delay(50);
+}
